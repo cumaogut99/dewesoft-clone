@@ -8,7 +8,8 @@ from typing import List
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QToolBar,
-    QFileDialog, QMessageBox, QLabel, QTabWidget
+    QFileDialog, QMessageBox, QLabel, QTabWidget,
+    QStackedWidget, QButtonGroup, QPushButton, QFrame
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QAction, QKeySequence, QColor, QPalette
@@ -32,6 +33,8 @@ from .channel_setup_widget import ChannelSetupWidget
 from .math_channel_dialog import MathChannelDialog
 from .hardware_dialog import HardwareDialog
 from .playback_widget import PlaybackBar
+from .analyze_widget import AnalyzeWidget
+from .statistics_widget import StatisticsWidget
 
 
 CHANNEL_DEFAULTS = [
@@ -81,6 +84,8 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._build_toolbar()
 
+        self._mode = "measure"   # "measure" | "analyze"
+
         self._ui_timer = QTimer(self)
         self._ui_timer.setInterval(50)
         self._ui_timer.timeout.connect(self._refresh_ui)
@@ -117,32 +122,93 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self._tabs = QTabWidget()
-        self._tabs.setDocumentMode(True)
+        # ---- Mode switcher bar ----
+        mode_bar = QFrame()
+        mode_bar.setFixedHeight(36)
+        mode_bar.setStyleSheet("QFrame { background: #181825; border-bottom: 1px solid #313244; }")
+        mode_layout = QHBoxLayout(mode_bar)
+        mode_layout.setContentsMargins(8, 2, 8, 2)
+        mode_layout.setSpacing(4)
+
+        self._btn_measure = QPushButton("⏺  Measure")
+        self._btn_analyze = QPushButton("🔍  Analyze")
+        for btn in (self._btn_measure, self._btn_analyze):
+            btn.setCheckable(True)
+            btn.setFixedHeight(28)
+            btn.setStyleSheet(
+                "QPushButton { border: 1px solid #45475a; border-radius: 4px;"
+                "  padding: 0 12px; color: #cdd6f4; background: transparent; }"
+                "QPushButton:checked { background: #313244; border-color: #89b4fa; color: #89b4fa; }"
+                "QPushButton:hover { background: #313244; }"
+            )
+        self._btn_measure.setChecked(True)
+
+        self._mode_grp = QButtonGroup(self)
+        self._mode_grp.addButton(self._btn_measure, 0)
+        self._mode_grp.addButton(self._btn_analyze, 1)
+        self._mode_grp.idClicked.connect(self._on_mode_switch)
+
+        mode_layout.addWidget(self._btn_measure)
+        mode_layout.addWidget(self._btn_analyze)
+        mode_layout.addStretch()
+
+        self._mode_info_lbl = QLabel("● LIVE")
+        self._mode_info_lbl.setStyleSheet("color: #a6e3a1; font-weight: bold; font-size: 10px;")
+        mode_layout.addWidget(self._mode_info_lbl)
+
+        root.addWidget(mode_bar)
+
+        # ---- Stacked widget: Measure tabs | Analyze tabs ----
+        self._stack = QStackedWidget()
+
+        # -- Measure tabs --
+        self._measure_tabs = QTabWidget()
+        self._measure_tabs.setDocumentMode(True)
 
         self._scope = OscilloscopeWidget(self._all_channels())
-        self._tabs.addTab(self._scope, "Oscilloscope")
+        self._measure_tabs.addTab(self._scope, "Oscilloscope")
 
         self._fft = FFTWidget(self._all_channels())
-        self._tabs.addTab(self._fft, "FFT Analyzer")
+        self._measure_tabs.addTab(self._fft, "FFT Analyzer")
 
         self._recorder = RecorderWidget(self._all_channels())
-        self._tabs.addTab(self._recorder, "Recorder")
+        self._measure_tabs.addTab(self._recorder, "Recorder")
 
         self._meters = DigitalMeterWidget(self._all_channels())
-        self._tabs.addTab(self._meters, "Digital Meters")
+        self._measure_tabs.addTab(self._meters, "Digital Meters")
 
         self._xy = XYPlotWidget(self._all_channels())
-        self._tabs.addTab(self._xy, "XY Plot")
+        self._measure_tabs.addTab(self._xy, "XY Plot")
 
         self._waterfall = WaterfallWidget(self._all_channels())
-        self._tabs.addTab(self._waterfall, "Waterfall")
+        self._measure_tabs.addTab(self._waterfall, "Waterfall")
+
+        self._stats_measure = StatisticsWidget(self._all_channels())
+        self._measure_tabs.addTab(self._stats_measure, "Statistics")
 
         self._ch_setup = ChannelSetupWidget(self.channels, self.generators)
         self._ch_setup.channels_changed.connect(self._on_channels_changed)
-        self._tabs.addTab(self._ch_setup, "Channel Setup")
+        self._measure_tabs.addTab(self._ch_setup, "Channel Setup")
 
-        root.addWidget(self._tabs)
+        self._stack.addWidget(self._measure_tabs)
+
+        # -- Analyze tabs --
+        self._analyze_tabs = QTabWidget()
+        self._analyze_tabs.setDocumentMode(True)
+
+        self._analyze = AnalyzeWidget(self._all_channels())
+        self._analyze.range_changed.connect(self._on_analyze_range_changed)
+        self._analyze_tabs.addTab(self._analyze, "Waveform Analysis")
+
+        self._fft_analyze = FFTWidget(self._all_channels())
+        self._analyze_tabs.addTab(self._fft_analyze, "FFT")
+
+        self._stats_analyze = StatisticsWidget(self._all_channels())
+        self._analyze_tabs.addTab(self._stats_analyze, "Statistics")
+
+        self._stack.addWidget(self._analyze_tabs)
+
+        root.addWidget(self._stack)
 
         # Playback bar (hidden by default)
         self._pb_bar_widget = QWidget()
@@ -268,27 +334,65 @@ class MainWindow(QMainWindow):
     def _on_engine_status(self, status: str) -> None:
         self._status_lbl.setText(f"  {status.capitalize()}")
 
+    @pyqtSlot(int)
+    def _on_mode_switch(self, mode_id: int) -> None:
+        self._mode = "measure" if mode_id == 0 else "analyze"
+        self._stack.setCurrentIndex(mode_id)
+
+        if self._mode == "measure":
+            self._mode_info_lbl.setText("● LIVE")
+            self._mode_info_lbl.setStyleSheet(
+                "color: #a6e3a1; font-weight: bold; font-size: 10px;"
+            )
+        else:
+            self._mode_info_lbl.setText("🔍 ANALYZE")
+            self._mode_info_lbl.setStyleSheet(
+                "color: #89b4fa; font-weight: bold; font-size: 10px;"
+            )
+            # Snapshot: refresh analyze views immediately
+            self._analyze.update_plots()
+            self._stats_analyze.update_plots()
+
+    @pyqtSlot(float, float)
+    def _on_analyze_range_changed(self, t_start: float, t_end: float) -> None:
+        if t_start == 0.0 and t_end == 0.0:
+            self._stats_analyze.set_range(None, None)
+        else:
+            self._stats_analyze.set_range(t_start, t_end)
+        self._stats_analyze.update_plots()
+
     @pyqtSlot()
     def _refresh_ui(self) -> None:
         # Update math channels from latest hardware data
         self._math_engine.update(self.channels)
 
-        tab = self._tabs.currentIndex()
-        if tab == 0:
-            self._scope.update_plots()
-        elif tab == 1:
-            self._fft.update_plots()
-        elif tab == 2:
-            self._recorder.update_plots()
-        elif tab == 3:
-            self._meters.update_plots()
-        elif tab == 4:
-            self._xy.update_plots()
-        elif tab == 5:
-            self._waterfall.update_plots()
-
         elapsed = self._engine.elapsed_time if self._engine else 0.0
         self._time_lbl.setText(f"T = {elapsed:.3f} s  ")
+
+        if self._mode == "measure":
+            tab = self._measure_tabs.currentIndex()
+            if tab == 0:
+                self._scope.update_plots()
+            elif tab == 1:
+                self._fft.update_plots()
+            elif tab == 2:
+                self._recorder.update_plots()
+            elif tab == 3:
+                self._meters.update_plots()
+            elif tab == 4:
+                self._xy.update_plots()
+            elif tab == 5:
+                self._waterfall.update_plots()
+            elif tab == 6:
+                self._stats_measure.update_plots()
+        else:  # analyze
+            tab = self._analyze_tabs.currentIndex()
+            if tab == 0:
+                self._analyze.update_plots()
+            elif tab == 1:
+                self._fft_analyze.update_plots()
+            elif tab == 2:
+                self._stats_analyze.update_plots()
 
     @pyqtSlot()
     def _on_channels_changed(self) -> None:
@@ -297,6 +401,10 @@ class MainWindow(QMainWindow):
         self._meters.set_channels(all_ch)
         self._xy.set_channels(all_ch)
         self._waterfall.set_channels(all_ch)
+        self._analyze.set_channels(all_ch)
+        self._stats_measure.set_channels(all_ch)
+        self._stats_analyze.set_channels(all_ch)
+        self._fft_analyze.set_channels(all_ch)
         self._update_toolbar_info()
 
     # ------------------------------------------------------------------
@@ -496,7 +604,8 @@ class MainWindow(QMainWindow):
             "<p>Personal learning project.</p>"
             "<b>Stack:</b> PyQt6 · pyqtgraph · NumPy · SciPy · h5py<br>"
             "<b>Hardware:</b> Simulated · sounddevice · openDAQ · Serial · Modbus<br>"
-            "<b>Views:</b> Oscilloscope · FFT · Recorder · Meters · XY · Waterfall<br>"
+            "<b>Measure:</b> Oscilloscope · FFT · Recorder · Meters · XY · Waterfall · Statistics<br>"
+            "<b>Analyze:</b> Waveform + region selection · FFT · Statistics table · Export<br>"
             "<b>Features:</b> Trigger · Cursors · Math channels · Playback · Projects"
         )
 
