@@ -1,6 +1,13 @@
+# Core (required)
 PyQt6>=6.5.0
 pyqtgraph>=0.13.3
 numpy>=1.24.0
 scipy>=1.11.0
 h5py>=3.9.0
 pandas>=2.0.0
+
+# Hardware drivers (install what you need)
+# sounddevice>=0.4.6      # audio card as DAQ (up to 192 kHz)
+# opendaq>=0.6            # openDAQ hardware modules + simulated device
+# pyserial>=3.5           # Arduino / serial devices
+# pymodbus>=3.5           # Modbus RTU/TCP PLCs and sensors
