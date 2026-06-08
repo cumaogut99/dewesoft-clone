@@ -52,7 +52,9 @@ class ChannelSetupWidget(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.currentRowChanged.connect(self._select_row)
+        self._table.itemSelectionChanged.connect(
+            lambda: self._select_row(self._table.currentRow())
+        )
         self._table.setMaximumWidth(300)
         left.addWidget(self._table)
 
