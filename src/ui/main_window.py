@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QToolBar,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QToolBar,
     QFileDialog, QMessageBox, QLabel, QTabWidget,
     QStackedWidget, QButtonGroup, QPushButton, QFrame
 )
